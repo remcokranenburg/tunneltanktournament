@@ -125,13 +125,15 @@ fn set_camera_viewports(
 ) {
     for window_resized in window_resized_reader.read() {
         let window = windows.get(window_resized.window).unwrap();
-        let max_width = window.physical_width() / 2;
-        let max_height = window.physical_height();
-        let size = window.physical_size() / 2;
+        let viewport_size = window.physical_size().x / 2 - 15;
+        let size = UVec2::splat(viewport_size);
+        let offset_y = (window.physical_size().y - viewport_size) / 2 + 10;
 
         for (camera_position, mut camera) in &mut query {
+            let offset = UVec2::new(10 * (camera_position.pos.x + 1), offset_y);
+
             camera.viewport = Some(Viewport {
-                physical_position: camera_position.pos * size,
+                physical_position: camera_position.pos * size + offset,
                 physical_size: size,
                 ..default()
             });
