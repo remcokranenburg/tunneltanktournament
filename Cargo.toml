@@ -1,0 +1,27 @@
+[package]
+name = "tunneltanktournament"
+version = "0.1.0"
+edition = "2024"
+
+# Enable a small amount of optimization in the dev profile.
+[profile.dev]
+opt-level = 1
+
+# Enable a large amount of optimization in the dev profile for dependencies.
+[profile.dev.package."*"]
+opt-level = 3
+
+# Enable more optimization in the release profile at the cost of compile time.
+[profile.release]
+# Compile the entire crate as one unit.
+# Slows compile times, marginal improvements.
+codegen-units = 1
+# Do a second optimization pass over the entire program, including dependencies.
+# Slows compile times, marginal improvements.
+lto = "thin"
+
+[dependencies]
+bevy = "0.17.3"
+bevy_ggrs = { version = "0.19.0", features = ["wasm-bindgen"] }
+bevy_matchbox = { version = "0.13.0", features = ["ggrs"] }
+fastrand = { version = "2.3.0", features = ["js"] }
