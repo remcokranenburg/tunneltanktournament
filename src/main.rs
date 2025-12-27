@@ -209,7 +209,7 @@ fn move_players(
 }
 
 fn start_matchbox_socket(mut commands: Commands) {
-    let room_url = "ws://home.burgsoft.nl:3536/tunneltanktournament?next=2";
+    let room_url = "wss://match.remcokranenburg.com/tunneltanktournament?next=2";
     info!("Connecting to matchbox room at: {}", room_url);
     commands.insert_resource(MatchboxSocket::new_unreliable(room_url));
 }

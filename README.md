@@ -5,7 +5,7 @@ online multiplayer! Not endorsed by the original creators!
 
 See it in action here:
 
-**[Play Tunnel Tank Tournament](tunnel.remcokranenburg.com)**
+**[Play Tunnel Tank Tournament](https://tunnel.remcokranenburg.com)**
 
 The matchmaking is very simple: every two people clicking on the link will be
 matched together.
