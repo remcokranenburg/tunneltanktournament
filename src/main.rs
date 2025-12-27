@@ -125,6 +125,8 @@ fn set_camera_viewports(
 ) {
     for window_resized in window_resized_reader.read() {
         let window = windows.get(window_resized.window).unwrap();
+        let max_width = window.physical_width() / 2;
+        let max_height = window.physical_height();
         let size = window.physical_size() / 2;
 
         for (camera_position, mut camera) in &mut query {
