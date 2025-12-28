@@ -1,9 +1,14 @@
-use crate::components::{CameraPosition, Player};
+use crate::{
+    components::{Bullet, BulletReady, CameraPosition, MoveDir, Player},
+    input::fire,
+};
 use bevy::{
+    asset::AssetMetaCheck,
     camera::{ScalingMode, Viewport},
     prelude::*,
     window::{WindowResized, WindowTheme},
 };
+use bevy_asset_loader::prelude::*;
 use bevy_ggrs::{LocalPlayers, prelude::*};
 use bevy_matchbox::{MatchboxSocket, prelude::PeerId};
 use fastrand::Rng;
@@ -22,47 +27,100 @@ const COLOR_ROCK: Color = Color::srgb(0.604, 0.604, 0.604);
 const COLOR_ENERGY: Color = Color::srgb(0.915, 0.922, 0.110);
 const COLOR_SHIELD: Color = Color::srgb(0.157, 0.953, 0.953);
 const COLOR_UI: Color = Color::srgb(0.396, 0.396, 0.396);
+const COLOR_BACKGROUND: Color = Color::srgb(0.0, 0.0, 0.179);
+
+const SPEED_MOVE_STANDARD: f32 = 7.0;
+const SPEED_BULLET: f32 = 48.0;
+
+const PLAYER_RADIUS: f32 = 2.5;
+const BULLET_RADIUS: f32 = 0.5;
 
 mod components;
 mod input;
 
 type Config = GgrsConfig<u8, PeerId>;
 
+#[derive(AssetCollection, Resource)]
+struct ImageAssets {
+    #[asset(path = "bullet.png")]
+    bullet: Handle<Image>,
+    #[asset(path = "tankblue.png")]
+    tank_blue: Handle<Image>,
+    #[asset(path = "tankgreen.png")]
+    tank_green: Handle<Image>,
+}
+
+#[derive(States, Debug, Hash, PartialEq, Eq, Clone, Default)]
+enum GameState {
+    #[default]
+    AssetLoading,
+    Matchmaking,
+    InGame,
+}
+
 fn main() {
     App::new()
         .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    fit_canvas_to_parent: true,
-                    prevent_default_event_handling: false,
-                    title: "Tunnel Tank Tournament".to_string(),
-                    window_theme: Some(WindowTheme::Dark),
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        fit_canvas_to_parent: true,
+                        prevent_default_event_handling: false,
+                        title: "Tunnel Tank Tournament".to_string(),
+                        window_theme: Some(WindowTheme::Dark),
+                        ..default()
+                    }),
                     ..default()
-                }),
-                ..default()
-            }),
+                })
+                .set(AssetPlugin {
+                    meta_check: AssetMetaCheck::Never,
+                    ..default()
+                })
+                .set(ImagePlugin::default_nearest()),
             GgrsPlugin::<Config>::default(),
         ))
-        .rollback_component_with_clone::<Transform>()
-        .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)))
-        .add_systems(
-            Startup,
-            (
-                spawn_camera,
-                spawn_map,
-                spawn_players,
-                start_matchbox_socket,
-            ),
+        .init_state::<GameState>()
+        .add_loading_state(
+            LoadingState::new(GameState::AssetLoading)
+                .load_collection::<ImageAssets>()
+                .continue_to_state(GameState::Matchmaking),
         )
-        .add_systems(Update, set_camera_viewports)
-        .add_systems(FixedUpdate, (wait_for_players, camera_follow))
+        .rollback_component_with_clone::<Transform>()
+        .rollback_component_with_copy::<BulletReady>()
+        .rollback_component_with_copy::<MoveDir>()
+        .insert_resource(ClearColor(COLOR_BACKGROUND))
+        .add_systems(
+            OnEnter(GameState::Matchmaking),
+            (spawn_camera, spawn_map, start_matchbox_socket).chain(),
+        )
+        .add_systems(OnEnter(GameState::InGame), spawn_players)
+        .add_systems(Update, (set_camera_viewports, camera_follow))
+        .add_systems(
+            FixedUpdate,
+            wait_for_players.run_if(in_state(GameState::Matchmaking)),
+        )
         .add_systems(ReadInputs, input::read_local_inputs)
-        .add_systems(GgrsSchedule, move_players)
+        .add_systems(
+            GgrsSchedule,
+            (
+                move_players,
+                reload_bullet,
+                fire_bullets,
+                move_bullet,
+                destroy_players,
+            )
+                .chain(),
+        )
         .run();
 }
 
 fn spawn_camera(mut commands: Commands) {
     commands.spawn((
+        Camera {
+            order: 0,
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            ..default()
+        },
         Camera2d,
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: ScalingMode::AutoMax {
@@ -77,6 +135,11 @@ fn spawn_camera(mut commands: Commands) {
     ));
 
     commands.spawn((
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            ..default()
+        },
         Camera2d,
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: ScalingMode::AutoMax {
@@ -118,13 +181,8 @@ fn spawn_map(mut commands: Commands) {
     }
 }
 
-fn set_camera_viewports(
-    windows: Query<&Window>,
-    mut window_resized_reader: MessageReader<WindowResized>,
-    mut query: Query<(&CameraPosition, &mut Camera)>,
-) {
-    for window_resized in window_resized_reader.read() {
-        let window = windows.get(window_resized.window).unwrap();
+fn set_camera_viewports(windows: Query<&Window>, mut query: Query<(&CameraPosition, &mut Camera)>) {
+    for window in &windows {
         let viewport_size = window.physical_size().x / 2 - 15;
         let size = UVec2::splat(viewport_size);
         let offset_y = (window.physical_size().y - viewport_size) / 2 + 10;
@@ -159,38 +217,42 @@ fn camera_follow(
     }
 }
 
-fn spawn_players(mut commands: Commands) {
+fn spawn_players(mut commands: Commands, images: Res<ImageAssets>) {
     commands
         .spawn((
             Player { id: 0 },
+            BulletReady(true),
             Transform::from_translation(Vec3::new(-20., 0., 10.)),
             Sprite {
-                color: COLOR_BLUE,
-                custom_size: Some(Vec2::new(5., 7.)),
+                image: images.tank_blue.clone(),
+                custom_size: Some(Vec2::new(5.0, 7.0)),
                 ..default()
             },
+            MoveDir(Vec2::Y),
         ))
         .add_rollback();
 
     commands
         .spawn((
             Player { id: 1 },
+            BulletReady(true),
             Transform::from_translation(Vec3::new(20., 0., 10.)),
             Sprite {
-                color: COLOR_GREEN,
-                custom_size: Some(Vec2::new(5., 7.)),
+                image: images.tank_green.clone(),
+                custom_size: Some(Vec2::new(5.0, 7.0)),
                 ..default()
             },
+            MoveDir(Vec2::Y),
         ))
         .add_rollback();
 }
 
 fn move_players(
-    mut players: Query<(&mut Transform, &Player)>,
+    mut players: Query<(&mut Transform, &Player, &mut MoveDir)>,
     inputs: Res<PlayerInputs<Config>>,
     time: Res<Time>,
 ) {
-    for (mut transform, player) in &mut players {
+    for (mut transform, player, mut move_dir) in &mut players {
         let (input, _) = inputs[player.id];
         let direction = input::direction(input);
 
@@ -198,8 +260,9 @@ fn move_players(
             continue;
         }
 
-        let move_speed = 7.;
-        let move_delta = direction * move_speed * time.delta_secs();
+        move_dir.0 = direction;
+
+        let move_delta = direction * SPEED_MOVE_STANDARD * time.delta_secs();
 
         let old_pos = transform.translation.xy();
         let limit = Vec2::new(MAP_WIDTH as f32 / 2.0 - 0.5, MAP_HEIGHT as f32 / 2.0 - 0.5);
@@ -207,6 +270,7 @@ fn move_players(
 
         transform.translation.x = new_pos.x;
         transform.translation.y = new_pos.y;
+        transform.rotation = Quat::from_rotation_arc_2d(Vec2::Y, direction);
     }
 }
 
@@ -216,7 +280,11 @@ fn start_matchbox_socket(mut commands: Commands) {
     commands.insert_resource(MatchboxSocket::new_unreliable(room_url));
 }
 
-fn wait_for_players(mut commands: Commands, mut socket: ResMut<MatchboxSocket>) {
+fn wait_for_players(
+    mut commands: Commands,
+    mut socket: ResMut<MatchboxSocket>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
     if socket.get_channel(0).is_err() {
         return; // skip system: we've already started
     }
@@ -250,4 +318,71 @@ fn wait_for_players(mut commands: Commands, mut socket: ResMut<MatchboxSocket>) 
         .expect("failed to start session");
 
     commands.insert_resource(Session::P2P(ggrs_session));
+    next_state.set(GameState::InGame);
+}
+
+fn fire_bullets(
+    mut commands: Commands,
+    inputs: Res<PlayerInputs<Config>>,
+    images: Res<ImageAssets>,
+    mut players: Query<(&Transform, &Player, &mut BulletReady, &MoveDir)>,
+) {
+    for (transform, player, mut bullet_ready, move_dir) in &mut players {
+        if fire(inputs[player.id].0) && bullet_ready.0 {
+            commands
+                .spawn((
+                    Bullet {
+                        owner_id: player.id,
+                    },
+                    Transform::from_translation(transform.translation)
+                        .with_rotation(Quat::from_rotation_arc_2d(Vec2::Y, move_dir.0)),
+                    *move_dir,
+                    Sprite {
+                        image: images.bullet.clone(),
+                        custom_size: Some(Vec2::new(1.0, 2.0)),
+                        ..default()
+                    },
+                ))
+                .add_rollback();
+
+            bullet_ready.0 = false;
+        }
+    }
+}
+
+fn reload_bullet(
+    inputs: Res<PlayerInputs<Config>>,
+    mut players: Query<(&mut BulletReady, &Player)>,
+) {
+    for (mut can_fire, player) in players.iter_mut() {
+        let (input, _) = inputs[player.id];
+        if !fire(input) {
+            can_fire.0 = true;
+        }
+    }
+}
+
+fn move_bullet(mut bullets: Query<(&mut Transform, &MoveDir), With<Bullet>>, time: Res<Time>) {
+    for (mut transform, move_dir) in &mut bullets {
+        let delta = move_dir.0 * SPEED_BULLET * time.delta_secs();
+        transform.translation += delta.extend(0.0);
+    }
+}
+
+fn destroy_players(
+    mut commands: Commands,
+    players: Query<(Entity, &Player, &Transform)>,
+    bullets: Query<(&Bullet, &Transform)>,
+) {
+    for (entity, player, player_transform) in &players {
+        for (bullet, bullet_transform) in &bullets {
+            let distance = Vec2::distance(
+                player_transform.translation.xy(),
+                bullet_transform.translation.xy(),
+            );
+            if distance < PLAYER_RADIUS + BULLET_RADIUS && bullet.owner_id != player.id as usize {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
 }

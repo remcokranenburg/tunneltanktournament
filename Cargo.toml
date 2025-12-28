@@ -22,6 +22,7 @@ lto = "thin"
 
 [dependencies]
 bevy = "0.17.3"
+bevy_asset_loader = "0.24.0"
 bevy_ggrs = { version = "0.19.0", features = ["wasm-bindgen"] }
 bevy_matchbox = { version = "0.13.0", features = ["ggrs"] }
 fastrand = { version = "2.3.0", features = ["js"] }

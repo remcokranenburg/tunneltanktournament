@@ -55,5 +55,9 @@ pub fn direction(input: u8) -> Vec2 {
     if input & INPUT_RIGHT != 0 {
         dir.x += 1.;
     }
-    dir
+    dir.normalize_or_zero()
+}
+
+pub fn fire(input: u8) -> bool {
+    input & INPUT_FIRE != 0
 }
