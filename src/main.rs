@@ -1,5 +1,6 @@
 use crate::{
-    components::{Bullet, BulletReady, CameraPosition, MoveDir, Player},
+    args::Args,
+    components::{Bullet, BulletReady, CameraPosition, MoveDir, Player, checksum_transform},
     input::fire,
 };
 use bevy::{
@@ -9,8 +10,9 @@ use bevy::{
     window::{WindowResized, WindowTheme},
 };
 use bevy_asset_loader::prelude::*;
-use bevy_ggrs::{LocalPlayers, prelude::*};
+use bevy_ggrs::{LocalPlayers, ggrs::DesyncDetection, prelude::*};
 use bevy_matchbox::{MatchboxSocket, prelude::PeerId};
+use clap::Parser;
 use fastrand::Rng;
 
 const NUM_PLAYERS: usize = 2;
@@ -35,6 +37,7 @@ const SPEED_BULLET: f32 = 48.0;
 const PLAYER_RADIUS: f32 = 2.5;
 const BULLET_RADIUS: f32 = 0.5;
 
+mod args;
 mod components;
 mod input;
 
@@ -59,6 +62,10 @@ enum GameState {
 }
 
 fn main() {
+    let args = Args::parse();
+
+    eprintln!("{args:#?}");
+
     App::new()
         .add_plugins((
             DefaultPlugins
@@ -86,18 +93,36 @@ fn main() {
                 .continue_to_state(GameState::Matchmaking),
         )
         .rollback_component_with_clone::<Transform>()
+        .rollback_component_with_clone::<Sprite>()
+        .rollback_component_with_copy::<Player>()
+        .rollback_component_with_copy::<Bullet>()
         .rollback_component_with_copy::<BulletReady>()
         .rollback_component_with_copy::<MoveDir>()
+        .checksum_component::<Transform>(checksum_transform)
+        .insert_resource(args)
         .insert_resource(ClearColor(COLOR_BACKGROUND))
         .add_systems(
             OnEnter(GameState::Matchmaking),
-            (spawn_camera, spawn_map, start_matchbox_socket).chain(),
+            (
+                spawn_camera,
+                spawn_map,
+                start_matchbox_socket.run_if(p2p_mode),
+            )
+                .chain(),
         )
         .add_systems(OnEnter(GameState::InGame), spawn_players)
         .add_systems(Update, (set_camera_viewports, camera_follow))
         .add_systems(
             FixedUpdate,
-            wait_for_players.run_if(in_state(GameState::Matchmaking)),
+            (
+                wait_for_players.run_if(p2p_mode),
+                start_synctest_session.run_if(synctest_mode),
+            )
+                .run_if(in_state(GameState::Matchmaking)),
+        )
+        .add_systems(
+            FixedUpdate,
+            handle_ggrs_events.run_if(in_state(GameState::InGame)),
         )
         .add_systems(ReadInputs, input::read_local_inputs)
         .add_systems(
@@ -112,6 +137,14 @@ fn main() {
                 .chain(),
         )
         .run();
+}
+
+fn synctest_mode(args: Res<Args>) -> bool {
+    args.synctest
+}
+
+fn p2p_mode(args: Res<Args>) -> bool {
+    !args.synctest
 }
 
 fn spawn_camera(mut commands: Commands) {
@@ -274,6 +307,32 @@ fn move_players(
     }
 }
 
+fn start_synctest_session(
+    mut commands: Commands,
+    mut next_state: ResMut<NextState<GameState>>,
+    args: Res<Args>,
+) {
+    info!("Starting synctest session");
+    let num_players = 2;
+
+    let mut session_builder = SessionBuilder::<Config>::new()
+        .with_num_players(num_players)
+        .with_input_delay(args.input_delay);
+
+    for i in 0..num_players {
+        session_builder = session_builder
+            .add_player(PlayerType::Local, i)
+            .expect("failed to add player");
+    }
+
+    let ggrs_session = session_builder
+        .start_synctest_session()
+        .expect("failed to start session");
+
+    commands.insert_resource(bevy_ggrs::Session::SyncTest(ggrs_session));
+    next_state.set(GameState::InGame);
+}
+
 fn start_matchbox_socket(mut commands: Commands) {
     let room_url = "wss://match.remcokranenburg.com/tunneltanktournament?next=2";
     info!("Connecting to matchbox room at: {}", room_url);
@@ -284,6 +343,7 @@ fn wait_for_players(
     mut commands: Commands,
     mut socket: ResMut<MatchboxSocket>,
     mut next_state: ResMut<NextState<GameState>>,
+    args: Res<Args>,
 ) {
     if socket.get_channel(0).is_err() {
         return; // skip system: we've already started
@@ -301,7 +361,8 @@ fn wait_for_players(
     // create a GGRS P2P session
     let mut session_builder = SessionBuilder::<Config>::new()
         .with_num_players(players.len())
-        .with_input_delay(2);
+        .with_desync_detection_mode(DesyncDetection::On { interval: 1 })
+        .with_input_delay(args.input_delay);
 
     for (i, player) in players.into_iter().enumerate() {
         session_builder = session_builder
@@ -382,6 +443,29 @@ fn destroy_players(
             );
             if distance < PLAYER_RADIUS + BULLET_RADIUS && bullet.owner_id != player.id as usize {
                 commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+fn handle_ggrs_events(mut session: ResMut<Session<Config>>) {
+    if let Session::P2P(s) = session.as_mut() {
+        for event in s.events() {
+            match event {
+                GgrsEvent::Disconnected { .. } | GgrsEvent::NetworkInterrupted { .. } => {
+                    warn!("GGRS event: {event:?}")
+                }
+                GgrsEvent::DesyncDetected {
+                    local_checksum,
+                    remote_checksum,
+                    frame,
+                    ..
+                } => {
+                    error!(
+                        "Desync on frame {frame}. Local checksum: {local_checksum:X}, remote checksum: {remote_checksum:X}"
+                    );
+                }
+                _ => info!("GGRS event: {event:?}"),
             }
         }
     }

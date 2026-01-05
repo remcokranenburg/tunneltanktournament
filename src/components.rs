@@ -1,6 +1,7 @@
 use bevy::prelude::*;
+use std::hash::{Hash, Hasher};
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct Player {
     pub id: usize,
 }
@@ -10,7 +11,7 @@ pub struct CameraPosition {
     pub pos: UVec2,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct Bullet {
     pub owner_id: usize,
 }
@@ -20,3 +21,22 @@ pub struct BulletReady(pub bool);
 
 #[derive(Component, Clone, Copy)]
 pub struct MoveDir(pub Vec2);
+
+pub fn checksum_transform(transform: &Transform) -> u64 {
+    let mut hasher = bevy_ggrs::checksum_hasher();
+    assert!(
+        transform.is_finite(),
+        "Hashing is not stable for NaN f32 values."
+    );
+
+    transform.translation.x.to_bits().hash(&mut hasher);
+    transform.translation.y.to_bits().hash(&mut hasher);
+    transform.translation.z.to_bits().hash(&mut hasher);
+
+    transform.rotation.x.to_bits().hash(&mut hasher);
+    transform.rotation.y.to_bits().hash(&mut hasher);
+    transform.rotation.z.to_bits().hash(&mut hasher);
+    transform.rotation.w.to_bits().hash(&mut hasher);
+
+    hasher.finish()
+}
