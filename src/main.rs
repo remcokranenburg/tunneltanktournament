@@ -117,6 +117,7 @@ fn main() {
             (
                 wait_for_players.run_if(p2p_mode),
                 start_synctest_session.run_if(synctest_mode),
+                input::read_unsynced_inputs,
             )
                 .run_if(in_state(GameState::Matchmaking)),
         )

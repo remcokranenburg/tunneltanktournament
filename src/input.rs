@@ -1,7 +1,6 @@
-use bevy::{platform::collections::HashMap, prelude::*};
-use bevy_ggrs::{LocalInputs, LocalPlayers};
-
 use crate::Config;
+use bevy::{platform::collections::HashMap, prelude::*, window::WindowCloseRequested};
+use bevy_ggrs::{LocalInputs, LocalPlayers};
 
 const INPUT_UP: u8 = 1 << 0;
 const INPUT_DOWN: u8 = 1 << 1;
@@ -39,6 +38,19 @@ pub fn read_local_inputs(
     }
 
     commands.insert_resource(LocalInputs::<Config>(local_inputs));
+}
+
+pub fn read_unsynced_inputs(
+    keys: Res<ButtonInput<KeyCode>>,
+    windows: Query<Entity, With<Window>>,
+    mut messages: MessageWriter<WindowCloseRequested>,
+) {
+    if keys.all_pressed([KeyCode::ControlLeft, KeyCode::KeyQ]) {
+        // request closing all windows
+        for window in windows {
+            messages.write(WindowCloseRequested { window });
+        }
+    }
 }
 
 pub fn direction(input: u8) -> Vec2 {
