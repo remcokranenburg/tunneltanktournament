@@ -7,10 +7,10 @@ use bevy::{
     asset::AssetMetaCheck,
     camera::{ScalingMode, Viewport},
     prelude::*,
-    window::{WindowResized, WindowTheme},
+    window::WindowTheme,
 };
 use bevy_asset_loader::prelude::*;
-use bevy_ggrs::{LocalPlayers, ggrs::DesyncDetection, prelude::*};
+use bevy_ggrs::{ggrs::DesyncDetection, prelude::*};
 use bevy_matchbox::{MatchboxSocket, prelude::PeerId};
 use clap::Parser;
 use fastrand::Rng;
@@ -19,16 +19,16 @@ const NUM_PLAYERS: usize = 2;
 const MAP_WIDTH: usize = 1000;
 const MAP_HEIGHT: usize = 500;
 
-const COLOR_BLUE: Color = Color::srgb(0.173, 0.173, 1.0);
-const COLOR_BLUE_DARK: Color = Color::srgb(0.0, 0.0, 0.714);
-const COLOR_GREEN: Color = Color::srgb(0.0, 1.0, 0.0);
-const COLOR_GREEN_DARK: Color = Color::srgb(0.0, 0.667, 0.0);
+// const COLOR_BLUE: Color = Color::srgb(0.173, 0.173, 1.0);
+// const COLOR_BLUE_DARK: Color = Color::srgb(0.0, 0.0, 0.714);
+// const COLOR_GREEN: Color = Color::srgb(0.0, 1.0, 0.0);
+// const COLOR_GREEN_DARK: Color = Color::srgb(0.0, 0.667, 0.0);
 const COLOR_TERRAIN_LIGHT: Color = Color::srgb(0.765, 0.475, 0.188);
 const COLOR_TERRAIN_DARK: Color = Color::srgb(0.729, 0.349, 0.016);
-const COLOR_ROCK: Color = Color::srgb(0.604, 0.604, 0.604);
-const COLOR_ENERGY: Color = Color::srgb(0.915, 0.922, 0.110);
-const COLOR_SHIELD: Color = Color::srgb(0.157, 0.953, 0.953);
-const COLOR_UI: Color = Color::srgb(0.396, 0.396, 0.396);
+// const COLOR_ROCK: Color = Color::srgb(0.604, 0.604, 0.604);
+// const COLOR_ENERGY: Color = Color::srgb(0.915, 0.922, 0.110);
+// const COLOR_SHIELD: Color = Color::srgb(0.157, 0.953, 0.953);
+// const COLOR_UI: Color = Color::srgb(0.396, 0.396, 0.396);
 const COLOR_BACKGROUND: Color = Color::srgb(0.0, 0.0, 0.179);
 
 const SPEED_MOVE_STANDARD: f32 = 7.0;
