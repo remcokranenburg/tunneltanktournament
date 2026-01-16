@@ -10,21 +10,33 @@ use bevy::{
     window::WindowTheme,
 };
 use bevy_asset_loader::prelude::*;
+use bevy_ecs_tilemap::prelude::*;
 use bevy_ggrs::{ggrs::DesyncDetection, prelude::*};
 use bevy_matchbox::{MatchboxSocket, prelude::PeerId};
 use clap::Parser;
 use fastrand::Rng;
 
 const NUM_PLAYERS: usize = 2;
-const MAP_WIDTH: usize = 1000;
-const MAP_HEIGHT: usize = 500;
+const TERRAIN_WIDTH: u32 = 1000;
+const TERRAIN_HEIGHT: u32 = 500;
+
+enum TerrainTextureIndex {
+    Dark,
+    Light,
+}
+
+impl Into<TileTextureIndex> for TerrainTextureIndex {
+    fn into(self) -> TileTextureIndex {
+        TileTextureIndex(self as u32)
+    }
+}
 
 // const COLOR_BLUE: Color = Color::srgb(0.173, 0.173, 1.0);
 // const COLOR_BLUE_DARK: Color = Color::srgb(0.0, 0.0, 0.714);
 // const COLOR_GREEN: Color = Color::srgb(0.0, 1.0, 0.0);
 // const COLOR_GREEN_DARK: Color = Color::srgb(0.0, 0.667, 0.0);
-const COLOR_TERRAIN_LIGHT: Color = Color::srgb(0.765, 0.475, 0.188);
-const COLOR_TERRAIN_DARK: Color = Color::srgb(0.729, 0.349, 0.016);
+// const COLOR_TERRAIN_LIGHT: Color = Color::srgb(0.765, 0.475, 0.188);
+// const COLOR_TERRAIN_DARK: Color = Color::srgb(0.729, 0.349, 0.016);
 // const COLOR_ROCK: Color = Color::srgb(0.604, 0.604, 0.604);
 // const COLOR_ENERGY: Color = Color::srgb(0.915, 0.922, 0.110);
 // const COLOR_SHIELD: Color = Color::srgb(0.157, 0.953, 0.953);
@@ -51,6 +63,8 @@ struct ImageAssets {
     tank_blue: Handle<Image>,
     #[asset(path = "tankgreen.png")]
     tank_green: Handle<Image>,
+    #[asset(path = "terrain.png")]
+    terrain: Handle<Image>,
 }
 
 #[derive(States, Debug, Hash, PartialEq, Eq, Clone, Default)]
@@ -85,6 +99,7 @@ fn main() {
                 })
                 .set(ImagePlugin::default_nearest()),
             GgrsPlugin::<Config>::default(),
+            TilemapPlugin,
         ))
         .init_state::<GameState>()
         .add_loading_state(
@@ -188,31 +203,54 @@ fn spawn_camera(mut commands: Commands) {
     ));
 }
 
-fn spawn_map(mut commands: Commands) {
+fn spawn_map(mut commands: Commands, images: Res<ImageAssets>) {
     let mut rng = Rng::with_seed(42);
 
-    for x in 0..MAP_WIDTH {
-        for y in 0..MAP_HEIGHT {
-            let color = if rng.bool() {
-                COLOR_TERRAIN_LIGHT
+    let map_size = TilemapSize {
+        x: TERRAIN_WIDTH,
+        y: TERRAIN_HEIGHT,
+    };
+
+    let tilemap_entity = commands.spawn_empty().id();
+    let mut tile_storage = TileStorage::empty(map_size);
+
+    for x in 0..TERRAIN_WIDTH {
+        for y in 0..TERRAIN_HEIGHT {
+            let index = if rng.bool() {
+                TerrainTextureIndex::Light
             } else {
-                COLOR_TERRAIN_DARK
+                TerrainTextureIndex::Dark
             };
 
-            commands.spawn((
-                Transform::from_translation(Vec3::new(
-                    x as f32 - MAP_WIDTH as f32 / 2.0,
-                    y as f32 - MAP_HEIGHT as f32 / 2.0,
-                    0.0,
-                )),
-                Sprite {
-                    color,
-                    custom_size: Some(Vec2::new(1.0, 1.0)),
+            let tile_pos = TilePos { x, y };
+
+            let tile_entity = commands
+                .spawn(TileBundle {
+                    texture_index: index.into(),
+                    position: tile_pos,
+                    tilemap_id: TilemapId(tilemap_entity),
                     ..default()
-                },
-            ));
+                })
+                .id();
+
+            tile_storage.set(&tile_pos, tile_entity);
         }
     }
+
+    let tile_size = TilemapTileSize { x: 1.0, y: 1.0 };
+    let grid_size = tile_size.into();
+    let map_type = TilemapType::Square;
+
+    commands.entity(tilemap_entity).insert(TilemapBundle {
+        grid_size,
+        map_type,
+        size: map_size,
+        storage: tile_storage,
+        texture: TilemapTexture::Single(images.terrain.clone()),
+        tile_size,
+        anchor: TilemapAnchor::Center,
+        ..default()
+    });
 }
 
 fn set_camera_viewports(windows: Query<&Window>, mut query: Query<(&CameraPosition, &mut Camera)>) {
@@ -299,7 +337,10 @@ fn move_players(
         let move_delta = direction * SPEED_MOVE_STANDARD * time.delta_secs();
 
         let old_pos = transform.translation.xy();
-        let limit = Vec2::new(MAP_WIDTH as f32 / 2.0 - 0.5, MAP_HEIGHT as f32 / 2.0 - 0.5);
+        let limit = Vec2::new(
+            TERRAIN_WIDTH as f32 / 2.0 - 0.5,
+            TERRAIN_HEIGHT as f32 / 2.0 - 0.5,
+        );
         let new_pos = (old_pos + move_delta).clamp(-limit, limit);
 
         transform.translation.x = new_pos.x;
