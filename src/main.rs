@@ -7,10 +7,11 @@ use bevy::{
     asset::AssetMetaCheck,
     camera::{ScalingMode, Viewport},
     prelude::*,
+    render::sync_world::SyncToRenderWorld,
     window::WindowTheme,
 };
 use bevy_asset_loader::prelude::*;
-use bevy_ecs_tilemap::prelude::*;
+use bevy_ecs_tilemap::{FrustumCulling, prelude::*};
 use bevy_ggrs::{ggrs::DesyncDetection, prelude::*};
 use bevy_matchbox::{MatchboxSocket, prelude::PeerId};
 use clap::Parser;
@@ -113,6 +114,32 @@ fn main() {
         .rollback_component_with_copy::<Bullet>()
         .rollback_component_with_copy::<BulletReady>()
         .rollback_component_with_copy::<MoveDir>()
+        // Tilemap bundle components
+        .rollback_component_with_copy::<TilemapGridSize>()
+        .rollback_component_with_copy::<TilemapType>()
+        .rollback_component_with_copy::<TilemapSize>()
+        .rollback_component_with_copy::<TilemapSpacing>()
+        .rollback_component_with_clone::<TileStorage>()
+        .rollback_component_with_clone::<TilemapTexture>()
+        .rollback_component_with_copy::<TilemapTileSize>()
+        .rollback_component_with_copy::<Transform>()
+        .rollback_component_with_copy::<GlobalTransform>()
+        .rollback_component_with_copy::<TilemapRenderSettings>()
+        .rollback_component_with_copy::<Visibility>()
+        .rollback_component_with_copy::<InheritedVisibility>()
+        .rollback_component_with_copy::<ViewVisibility>()
+        .rollback_component_with_copy::<FrustumCulling>()
+        .rollback_component_with_clone::<MaterialTilemapHandle<StandardTilemapMaterial>>()
+        .rollback_component_with_copy::<SyncToRenderWorld>()
+        .rollback_component_with_copy::<TilemapAnchor>()
+        // Tile components
+        .rollback_component_with_copy::<TilePos>()
+        .rollback_component_with_copy::<TileTextureIndex>()
+        .rollback_component_with_copy::<TilemapId>()
+        .rollback_component_with_copy::<TileVisible>()
+        .rollback_component_with_copy::<TileFlip>()
+        .rollback_component_with_copy::<TileColor>()
+        .rollback_component_with_copy::<TilePosOld>()
         .checksum_component::<Transform>(checksum_transform)
         .insert_resource(args)
         .insert_resource(ClearColor(COLOR_BACKGROUND))
@@ -120,7 +147,7 @@ fn main() {
             OnEnter(GameState::Matchmaking),
             (
                 spawn_camera,
-                spawn_map,
+                spawn_terrain,
                 start_matchbox_socket.run_if(p2p_mode),
             )
                 .chain(),
@@ -149,6 +176,7 @@ fn main() {
                 fire_bullets,
                 move_bullet,
                 destroy_players,
+                destroy_terrain,
             )
                 .chain(),
         )
@@ -203,7 +231,7 @@ fn spawn_camera(mut commands: Commands) {
     ));
 }
 
-fn spawn_map(mut commands: Commands, images: Res<ImageAssets>) {
+fn spawn_terrain(mut commands: Commands, images: Res<ImageAssets>) {
     let mut rng = Rng::with_seed(42);
 
     let map_size = TilemapSize {
@@ -241,16 +269,19 @@ fn spawn_map(mut commands: Commands, images: Res<ImageAssets>) {
     let grid_size = tile_size.into();
     let map_type = TilemapType::Square;
 
-    commands.entity(tilemap_entity).insert(TilemapBundle {
-        grid_size,
-        map_type,
-        size: map_size,
-        storage: tile_storage,
-        texture: TilemapTexture::Single(images.terrain.clone()),
-        tile_size,
-        anchor: TilemapAnchor::Center,
-        ..default()
-    });
+    commands
+        .entity(tilemap_entity)
+        .insert(TilemapBundle {
+            grid_size,
+            map_type,
+            size: map_size,
+            storage: tile_storage,
+            texture: TilemapTexture::Single(images.terrain.clone()),
+            tile_size,
+            anchor: TilemapAnchor::Center,
+            ..default()
+        })
+        .add_rollback();
 }
 
 fn set_camera_viewports(windows: Query<&Window>, mut query: Query<(&CameraPosition, &mut Camera)>) {
@@ -294,7 +325,7 @@ fn spawn_players(mut commands: Commands, images: Res<ImageAssets>) {
         .spawn((
             Player { id: 0 },
             BulletReady(true),
-            Transform::from_translation(Vec3::new(-20., 0., 10.)),
+            Transform::from_translation(Vec3::new(-40., 0., 10.)),
             Sprite {
                 image: images.tank_blue.clone(),
                 custom_size: Some(Vec2::new(5.0, 7.0)),
@@ -308,7 +339,7 @@ fn spawn_players(mut commands: Commands, images: Res<ImageAssets>) {
         .spawn((
             Player { id: 1 },
             BulletReady(true),
-            Transform::from_translation(Vec3::new(20., 0., 10.)),
+            Transform::from_translation(Vec3::new(40., 0., 10.)),
             Sprite {
                 image: images.tank_green.clone(),
                 custom_size: Some(Vec2::new(5.0, 7.0)),
@@ -488,6 +519,51 @@ fn destroy_players(
             }
         }
     }
+}
+
+fn destroy_terrain(
+    players: Query<&Transform, With<Player>>,
+    mut tile_storage: Query<&mut TileStorage>,
+    mut visibility_query: Query<&mut TileVisible>,
+) {
+    for player_transform in &players {
+        let player_tile = TilePos {
+            x: (player_transform.translation.x + TERRAIN_WIDTH as f32 / 2.0).floor() as u32,
+            y: (player_transform.translation.y + TERRAIN_HEIGHT as f32 / 2.0).floor() as u32,
+        };
+
+        let neighbors = get_neighbors_in_radius(&player_tile, 2);
+
+        for tile_storage in &mut tile_storage {
+            for neighbor in neighbors.iter() {
+                if let Some(tile_entity) = tile_storage.get(neighbor) {
+                    if let Ok(mut visibility) = visibility_query.get_mut(tile_entity) {
+                        visibility.0 = false;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn get_neighbors_in_radius(pos: &TilePos, radius: u32) -> Vec<TilePos> {
+    let mut neighbors = Vec::new();
+
+    for dx in -(radius as i32)..=(radius as i32) {
+        for dy in -(radius as i32)..=(radius as i32) {
+            let neighbor_x = pos.x as i32 + dx;
+            let neighbor_y = pos.y as i32 + dy;
+
+            if neighbor_x >= 0 && neighbor_y >= 0 {
+                neighbors.push(TilePos {
+                    x: neighbor_x as u32,
+                    y: neighbor_y as u32,
+                });
+            }
+        }
+    }
+
+    neighbors
 }
 
 fn handle_ggrs_events(mut session: ResMut<Session<Config>>) {
