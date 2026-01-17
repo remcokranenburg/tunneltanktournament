@@ -554,7 +554,11 @@ fn get_neighbors_in_radius(pos: &TilePos, radius: u32) -> Vec<TilePos> {
             let neighbor_x = pos.x as i32 + dx;
             let neighbor_y = pos.y as i32 + dy;
 
-            if neighbor_x >= 0 && neighbor_y >= 0 {
+            if neighbor_x >= 0
+                && neighbor_x < TERRAIN_WIDTH as i32
+                && neighbor_y >= 0
+                && neighbor_y < TERRAIN_HEIGHT as i32
+            {
                 neighbors.push(TilePos {
                     x: neighbor_x as u32,
                     y: neighbor_y as u32,
