@@ -14,6 +14,7 @@ use bevy_asset_loader::prelude::*;
 use bevy_ecs_tilemap::{FrustumCulling, prelude::*};
 use bevy_ggrs::{ggrs::DesyncDetection, prelude::*};
 use bevy_matchbox::{MatchboxSocket, prelude::PeerId};
+use bevy_roll_safe::prelude::*;
 use clap::Parser;
 use fastrand::Rng;
 
@@ -76,6 +77,24 @@ enum GameState {
     InGame,
 }
 
+#[derive(States, Clone, Eq, PartialEq, Debug, Hash, Default, Reflect)]
+enum RollbackState {
+    /// When the characters running and gunning
+    #[default]
+    InRound,
+    /// When one character is dead, and we're transitioning to the next round
+    RoundEnd,
+}
+
+#[derive(Resource, Clone, Deref, DerefMut)]
+struct RoundEndTimer(Timer);
+
+impl Default for RoundEndTimer {
+    fn default() -> Self {
+        RoundEndTimer(Timer::from_seconds(2.0, TimerMode::Repeating))
+    }
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -100,6 +119,7 @@ fn main() {
                 })
                 .set(ImagePlugin::default_nearest()),
             GgrsPlugin::<Config>::default(),
+            RollbackSchedulePlugin::new_ggrs(),
             TilemapPlugin,
         ))
         .init_state::<GameState>()
@@ -108,6 +128,8 @@ fn main() {
                 .load_collection::<ImageAssets>()
                 .continue_to_state(GameState::Matchmaking),
         )
+        .init_ggrs_state::<RollbackState>()
+        .rollback_resource_with_clone::<RoundEndTimer>()
         .rollback_component_with_clone::<Transform>()
         .rollback_component_with_clone::<Sprite>()
         .rollback_component_with_copy::<Player>()
@@ -132,7 +154,7 @@ fn main() {
         .rollback_component_with_clone::<MaterialTilemapHandle<StandardTilemapMaterial>>()
         .rollback_component_with_copy::<SyncToRenderWorld>()
         .rollback_component_with_copy::<TilemapAnchor>()
-        // Tile components
+        // Tile bundle components
         .rollback_component_with_copy::<TilePos>()
         .rollback_component_with_copy::<TileTextureIndex>()
         .rollback_component_with_copy::<TilemapId>()
@@ -143,6 +165,7 @@ fn main() {
         .checksum_component::<Transform>(checksum_transform)
         .insert_resource(args)
         .insert_resource(ClearColor(COLOR_BACKGROUND))
+        .insert_resource(RoundEndTimer::default())
         .add_systems(
             OnEnter(GameState::Matchmaking),
             (
@@ -152,7 +175,6 @@ fn main() {
             )
                 .chain(),
         )
-        .add_systems(OnEnter(GameState::InGame), spawn_players)
         .add_systems(Update, (set_camera_viewports, camera_follow))
         .add_systems(
             FixedUpdate,
@@ -168,8 +190,9 @@ fn main() {
             handle_ggrs_events.run_if(in_state(GameState::InGame)),
         )
         .add_systems(ReadInputs, input::read_local_inputs)
+        .add_systems(OnEnter(RollbackState::InRound), spawn_players)
         .add_systems(
-            GgrsSchedule,
+            RollbackUpdate,
             (
                 move_players,
                 reload_bullet,
@@ -178,7 +201,14 @@ fn main() {
                 destroy_players,
                 destroy_terrain,
             )
-                .chain(),
+                .chain()
+                .run_if(in_state(RollbackState::InRound)),
+        )
+        .add_systems(
+            RollbackUpdate,
+            round_end_timeout
+                .ambiguous_with(destroy_players)
+                .run_if(in_state(RollbackState::RoundEnd)),
         )
         .run();
 }
@@ -320,7 +350,21 @@ fn camera_follow(
     }
 }
 
-fn spawn_players(mut commands: Commands, images: Res<ImageAssets>) {
+fn spawn_players(
+    mut commands: Commands,
+    players: Query<Entity, With<Player>>,
+    bullets: Query<Entity, With<Bullet>>,
+    images: Res<ImageAssets>,
+) {
+    // prepare next round by despawning all existing players and bullets
+    for player in &players {
+        commands.entity(player).despawn();
+    }
+
+    for bullet in &bullets {
+        commands.entity(bullet).despawn();
+    }
+
     commands
         .spawn((
             Player { id: 0 },
@@ -507,6 +551,7 @@ fn destroy_players(
     mut commands: Commands,
     players: Query<(Entity, &Player, &Transform)>,
     bullets: Query<(&Bullet, &Transform)>,
+    mut next_state: ResMut<NextState<RollbackState>>,
 ) {
     for (entity, player, player_transform) in &players {
         for (bullet, bullet_transform) in &bullets {
@@ -516,6 +561,7 @@ fn destroy_players(
             );
             if distance < PLAYER_RADIUS + BULLET_RADIUS && bullet.owner_id != player.id as usize {
                 commands.entity(entity).despawn();
+                next_state.set(RollbackState::RoundEnd);
             }
         }
     }
@@ -568,6 +614,18 @@ fn get_neighbors_in_radius(pos: &TilePos, radius: u32) -> Vec<TilePos> {
     }
 
     neighbors
+}
+
+fn round_end_timeout(
+    mut timer: ResMut<RoundEndTimer>,
+    mut state: ResMut<NextState<RollbackState>>,
+    time: Res<Time>,
+) {
+    timer.tick(time.delta());
+
+    if timer.just_finished() {
+        state.set(RollbackState::InRound);
+    }
 }
 
 fn handle_ggrs_events(mut session: ResMut<Session<Config>>) {
