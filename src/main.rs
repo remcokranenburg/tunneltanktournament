@@ -419,18 +419,15 @@ fn spawn_players(
 
     let mut rng = Rng::with_seed(**session_seed);
 
-    let half_width = TERRAIN_WIDTH as f32 / 2.0;
-    let half_height = TERRAIN_HEIGHT as f32 / 2.0;
-
     let p0_pos = Vec3::new(
-        rng.f32() * (TERRAIN_WIDTH - 1) as f32 - half_width,
-        rng.f32() * (TERRAIN_HEIGHT - 1) as f32 - half_height,
+        (rng.f32() - 0.5) * TERRAIN_WIDTH as f32,
+        (rng.f32() - 0.5) * TERRAIN_HEIGHT as f32,
         10.0,
     );
 
     let p1_pos = Vec3::new(
-        rng.f32() * (TERRAIN_WIDTH - 1) as f32 - half_width,
-        rng.f32() * (TERRAIN_HEIGHT - 1) as f32 - half_height,
+        (rng.f32() - 0.5) * TERRAIN_WIDTH as f32,
+        (rng.f32() - 0.5) * TERRAIN_HEIGHT as f32,
         10.0,
     );
 
