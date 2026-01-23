@@ -21,8 +21,8 @@ use clap::Parser;
 use fastrand::Rng;
 
 const MAX_NUM_PLAYERS: usize = 2;
-const TERRAIN_WIDTH: u32 = 1000;
-const TERRAIN_HEIGHT: u32 = 500;
+const TERRAIN_WIDTH: u32 = 500;
+const TERRAIN_HEIGHT: u32 = 250;
 
 enum TerrainTextureIndex {
     Dark,
@@ -47,8 +47,8 @@ impl Into<TileTextureIndex> for TerrainTextureIndex {
 // const COLOR_UI: Color = Color::srgb(0.396, 0.396, 0.396);
 const COLOR_BACKGROUND: Color = Color::srgb(0.0, 0.0, 0.179);
 
-const SPEED_MOVE_STANDARD: f32 = 7.0;
-const SPEED_BULLET: f32 = 48.0;
+const SPEED_MOVE_STANDARD: f32 = 14.0;
+const SPEED_BULLET: f32 = 98.0;
 
 const PLAYER_RADIUS: f32 = 2.5;
 const BULLET_RADIUS: f32 = 0.5;
