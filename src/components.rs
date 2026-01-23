@@ -2,6 +2,11 @@ use bevy::prelude::*;
 use std::hash::{Hash, Hasher};
 
 #[derive(Component, Clone, Copy)]
+pub struct PlayerRef {
+    pub id: usize,
+}
+
+#[derive(Component, Clone, Copy)]
 pub struct Player {
     pub id: usize,
 }

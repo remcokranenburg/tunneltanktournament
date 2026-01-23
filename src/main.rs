@@ -1,6 +1,8 @@
 use crate::{
     args::Args,
-    components::{Bullet, BulletReady, CameraPosition, MoveDir, Player, checksum_transform},
+    components::{
+        Bullet, BulletReady, CameraPosition, MoveDir, Player, PlayerRef, checksum_transform,
+    },
     input::fire,
 };
 use bevy::{
@@ -18,7 +20,7 @@ use bevy_roll_safe::prelude::*;
 use clap::Parser;
 use fastrand::Rng;
 
-const NUM_PLAYERS: usize = 2;
+const MAX_NUM_PLAYERS: usize = 2;
 const TERRAIN_WIDTH: u32 = 1000;
 const TERRAIN_HEIGHT: u32 = 500;
 
@@ -95,6 +97,14 @@ impl Default for RoundEndTimer {
     }
 }
 
+#[derive(Default, Clone, Copy, Debug)]
+struct PlayerStats {
+    score: u32, // TODO: add more stats later
+}
+
+#[derive(Resource, Clone, Deref, DerefMut, Default, Debug)]
+struct GameStats([PlayerStats; MAX_NUM_PLAYERS]);
+
 fn main() {
     let args = Args::parse();
 
@@ -130,6 +140,7 @@ fn main() {
         )
         .init_ggrs_state::<RollbackState>()
         .rollback_resource_with_clone::<RoundEndTimer>()
+        .rollback_resource_with_clone::<GameStats>()
         .rollback_component_with_clone::<Transform>()
         .rollback_component_with_clone::<Sprite>()
         .rollback_component_with_copy::<Player>()
@@ -165,7 +176,8 @@ fn main() {
         .checksum_component::<Transform>(checksum_transform)
         .insert_resource(args)
         .insert_resource(ClearColor(COLOR_BACKGROUND))
-        .insert_resource(RoundEndTimer::default())
+        .init_resource::<RoundEndTimer>()
+        .init_resource::<GameStats>()
         .add_systems(
             OnEnter(GameState::Matchmaking),
             (
@@ -175,7 +187,7 @@ fn main() {
             )
                 .chain(),
         )
-        .add_systems(Update, (set_camera_viewports, camera_follow))
+        .add_systems(Update, (set_camera_viewports, camera_follow, update_ui))
         .add_systems(
             FixedUpdate,
             (
@@ -222,43 +234,79 @@ fn p2p_mode(args: Res<Args>) -> bool {
 }
 
 fn spawn_camera(mut commands: Commands) {
-    commands.spawn((
-        Camera {
-            order: 0,
-            clear_color: ClearColorConfig::Custom(Color::BLACK),
-            ..default()
-        },
-        Camera2d,
-        Projection::Orthographic(OrthographicProjection {
-            scaling_mode: ScalingMode::AutoMax {
-                max_width: 76.0,
-                max_height: 76.0,
+    let camera0 = commands
+        .spawn((
+            Camera {
+                order: 0,
+                clear_color: ClearColorConfig::Custom(Color::BLACK),
+                ..default()
             },
-            ..OrthographicProjection::default_2d()
-        }),
-        CameraPosition {
-            pos: UVec2::new(0, 0),
-        },
-    ));
+            Camera2d,
+            Projection::Orthographic(OrthographicProjection {
+                scaling_mode: ScalingMode::AutoMax {
+                    max_width: 76.0,
+                    max_height: 76.0,
+                },
+                ..OrthographicProjection::default_2d()
+            }),
+            CameraPosition {
+                pos: UVec2::new(0, 0),
+            },
+        ))
+        .id();
 
+    spawn_ui(&mut commands, camera0, 0);
+
+    let camera1 = commands
+        .spawn((
+            Camera {
+                order: 1,
+                clear_color: ClearColorConfig::Custom(Color::BLACK),
+                ..default()
+            },
+            Camera2d,
+            Projection::Orthographic(OrthographicProjection {
+                scaling_mode: ScalingMode::AutoMax {
+                    max_width: 76.0,
+                    max_height: 76.0,
+                },
+                ..OrthographicProjection::default_2d()
+            }),
+            CameraPosition {
+                pos: UVec2::new(1, 0),
+            },
+        ))
+        .id();
+
+    spawn_ui(&mut commands, camera1, 1);
+}
+
+fn spawn_ui(commands: &mut Commands, camera_entity: Entity, player_id: usize) {
     commands.spawn((
-        Camera {
-            order: 1,
-            clear_color: ClearColorConfig::Custom(Color::BLACK),
+        UiTargetCamera(camera_entity),
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
             ..default()
         },
-        Camera2d,
-        Projection::Orthographic(OrthographicProjection {
-            scaling_mode: ScalingMode::AutoMax {
-                max_width: 76.0,
-                max_height: 76.0,
-            },
-            ..OrthographicProjection::default_2d()
-        }),
-        CameraPosition {
-            pos: UVec2::new(1, 0),
-        },
+        children![(
+            PlayerRef { id: player_id },
+            Text::new("0"),
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(5.0),
+                margin: auto().horizontal(),
+                ..default()
+            }
+        )],
     ));
+}
+
+fn update_ui(game_stats: Res<GameStats>, mut query: Query<(&PlayerRef, &mut Text)>) {
+    for (player, mut text) in &mut query {
+        let stats = &game_stats[player.id];
+        text.0 = format!("{}", stats.score);
+    }
 }
 
 fn spawn_terrain(mut commands: Commands, images: Res<ImageAssets>) {
@@ -469,7 +517,7 @@ fn wait_for_players(
     socket.update_peers();
     let players = socket.players();
 
-    if players.len() < NUM_PLAYERS {
+    if players.len() < MAX_NUM_PLAYERS {
         return; // wait for more players
     }
 
@@ -552,6 +600,7 @@ fn destroy_players(
     players: Query<(Entity, &Player, &Transform)>,
     bullets: Query<(&Bullet, &Transform)>,
     mut next_state: ResMut<NextState<RollbackState>>,
+    mut game_stats: ResMut<GameStats>,
 ) {
     for (entity, player, player_transform) in &players {
         for (bullet, bullet_transform) in &bullets {
@@ -562,6 +611,12 @@ fn destroy_players(
             if distance < PLAYER_RADIUS + BULLET_RADIUS && bullet.owner_id != player.id as usize {
                 commands.entity(entity).despawn();
                 next_state.set(RollbackState::RoundEnd);
+                game_stats[bullet.owner_id].score += 1;
+
+                info!(
+                    "Player {} hit Player {}! Scores: {:?}",
+                    bullet.owner_id, player.id, &**game_stats
+                );
             }
         }
     }
