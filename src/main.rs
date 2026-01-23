@@ -105,6 +105,9 @@ struct PlayerStats {
 #[derive(Resource, Clone, Deref, DerefMut, Default, Debug)]
 struct GameStats([PlayerStats; MAX_NUM_PLAYERS]);
 
+#[derive(Resource, Default, Clone, Copy, Debug, Deref, DerefMut)]
+struct SessionSeed(u64);
+
 fn main() {
     let args = Args::parse();
 
@@ -403,6 +406,7 @@ fn spawn_players(
     players: Query<Entity, With<Player>>,
     bullets: Query<Entity, With<Bullet>>,
     images: Res<ImageAssets>,
+    session_seed: Res<SessionSeed>,
 ) {
     // prepare next round by despawning all existing players and bullets
     for player in &players {
@@ -413,11 +417,28 @@ fn spawn_players(
         commands.entity(bullet).despawn();
     }
 
+    let mut rng = Rng::with_seed(**session_seed);
+
+    let half_width = TERRAIN_WIDTH as f32 / 2.0;
+    let half_height = TERRAIN_HEIGHT as f32 / 2.0;
+
+    let p0_pos = Vec3::new(
+        rng.f32() * (TERRAIN_WIDTH - 1) as f32 - half_width,
+        rng.f32() * (TERRAIN_HEIGHT - 1) as f32 - half_height,
+        10.0,
+    );
+
+    let p1_pos = Vec3::new(
+        rng.f32() * (TERRAIN_WIDTH - 1) as f32 - half_width,
+        rng.f32() * (TERRAIN_HEIGHT - 1) as f32 - half_height,
+        10.0,
+    );
+
     commands
         .spawn((
             Player { id: 0 },
             BulletReady(true),
-            Transform::from_translation(Vec3::new(-40., 0., 10.)),
+            Transform::from_translation(p0_pos),
             Sprite {
                 image: images.tank_blue.clone(),
                 custom_size: Some(Vec2::new(5.0, 7.0)),
@@ -431,7 +452,7 @@ fn spawn_players(
         .spawn((
             Player { id: 1 },
             BulletReady(true),
-            Transform::from_translation(Vec3::new(40., 0., 10.)),
+            Transform::from_translation(p1_pos),
             Sprite {
                 image: images.tank_green.clone(),
                 custom_size: Some(Vec2::new(5.0, 7.0)),
@@ -495,6 +516,7 @@ fn start_synctest_session(
         .expect("failed to start session");
 
     commands.insert_resource(bevy_ggrs::Session::SyncTest(ggrs_session));
+    commands.insert_resource(SessionSeed(Rng::new().u64(0..=u64::MAX)));
     next_state.set(GameState::InGame);
 }
 
@@ -522,6 +544,20 @@ fn wait_for_players(
     }
 
     info!("All players connected, starting game!");
+
+    let id = socket
+        .id()
+        .expect("failed to get local peer ID")
+        .0
+        .as_u64_pair();
+    let mut seed = id.0 ^ id.1;
+
+    for peer in socket.connected_peers() {
+        let peer_id = peer.0.as_u64_pair();
+        seed ^= peer_id.0 ^ peer_id.1;
+    }
+
+    commands.insert_resource(SessionSeed(seed));
 
     // create a GGRS P2P session
     let mut session_builder = SessionBuilder::<Config>::new()
