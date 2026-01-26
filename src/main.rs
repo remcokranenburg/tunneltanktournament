@@ -1,7 +1,8 @@
 use crate::{
     args::Args,
     components::{
-        Bullet, BulletReady, CameraPosition, MoveDir, Player, PlayerRef, checksum_transform,
+        Bullet, BulletReady, CameraPosition, MoveDir, OnLoadingScreen, OnMatchmakingScreen, Player,
+        PlayerRef, checksum_transform,
     },
     input::fire,
 };
@@ -108,6 +109,13 @@ struct GameStats([PlayerStats; MAX_NUM_PLAYERS]);
 #[derive(Resource, Default, Clone, Copy, Debug, Deref, DerefMut)]
 struct SessionSeed(u64);
 
+#[derive(Resource, Default, Clone, Copy, Debug)]
+enum CameraMode {
+    #[default]
+    Overview,
+    Follow,
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -181,16 +189,36 @@ fn main() {
         .insert_resource(ClearColor(COLOR_BACKGROUND))
         .init_resource::<RoundEndTimer>()
         .init_resource::<GameStats>()
+        .init_resource::<CameraMode>()
+        .add_systems(
+            OnEnter(GameState::AssetLoading),
+            (spawn_camera, show_loading_screen),
+        )
+        .add_systems(
+            OnExit(GameState::AssetLoading),
+            clear_entities::<OnLoadingScreen>,
+        )
         .add_systems(
             OnEnter(GameState::Matchmaking),
             (
-                spawn_camera,
-                spawn_terrain,
+                show_matchmaking_screen,
                 start_matchbox_socket.run_if(p2p_mode),
             )
                 .chain(),
         )
-        .add_systems(Update, (set_camera_viewports, camera_follow, update_ui))
+        .add_systems(
+            OnExit(GameState::Matchmaking),
+            clear_entities::<OnMatchmakingScreen>,
+        )
+        .add_systems(
+            Update,
+            (
+                set_camera_viewports,
+                apply_camera_mode,
+                camera_follow,
+                update_ui,
+            ),
+        )
         .add_systems(
             FixedUpdate,
             (
@@ -199,6 +227,10 @@ fn main() {
                 input::read_unsynced_inputs,
             )
                 .run_if(in_state(GameState::Matchmaking)),
+        )
+        .add_systems(
+            OnEnter(GameState::InGame),
+            (set_follow_camera, spawn_terrain).chain(),
         )
         .add_systems(
             FixedUpdate,
@@ -236,12 +268,61 @@ fn p2p_mode(args: Res<Args>) -> bool {
     !args.synctest
 }
 
-fn spawn_camera(mut commands: Commands) {
+fn show_loading_screen(mut commands: Commands) {
+    commands.spawn((
+        OnLoadingScreen,
+        Node {
+            position_type: PositionType::Absolute,
+            margin: auto().all(),
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            ..default()
+        },
+        Text::new("Loading..."),
+    ));
+}
+
+fn show_matchmaking_screen(mut commands: Commands) {
+    commands.spawn((
+        OnMatchmakingScreen,
+        Node {
+            position_type: PositionType::Absolute,
+            margin: auto().horizontal(),
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            ..default()
+        },
+        Text::new("Waiting for other players..."),
+    ));
+}
+
+fn spawn_camera(mut commands: Commands, camera_mode: Res<CameraMode>) {
+    let camera_overview = commands
+        .spawn((
+            Camera {
+                order: 2,
+                clear_color: ClearColorConfig::Custom(Color::BLACK),
+                is_active: matches!(camera_mode.as_ref(), CameraMode::Overview),
+                ..default()
+            },
+            Camera2d,
+            Projection::Orthographic(OrthographicProjection {
+                scaling_mode: ScalingMode::AutoMin {
+                    min_width: TERRAIN_WIDTH as f32,
+                    min_height: TERRAIN_HEIGHT as f32,
+                },
+                ..OrthographicProjection::default_2d()
+            }),
+        ))
+        .id();
+    spawn_combined_ui(&mut commands, camera_overview);
+
     let camera0 = commands
         .spawn((
             Camera {
                 order: 0,
                 clear_color: ClearColorConfig::Custom(Color::BLACK),
+                is_active: matches!(camera_mode.as_ref(), CameraMode::Follow),
                 ..default()
             },
             Camera2d,
@@ -265,6 +346,7 @@ fn spawn_camera(mut commands: Commands) {
             Camera {
                 order: 1,
                 clear_color: ClearColorConfig::Custom(Color::BLACK),
+                is_active: matches!(camera_mode.as_ref(), CameraMode::Follow),
                 ..default()
             },
             Camera2d,
@@ -282,6 +364,39 @@ fn spawn_camera(mut commands: Commands) {
         .id();
 
     spawn_ui(&mut commands, camera1, 1);
+}
+
+fn spawn_combined_ui(commands: &mut Commands, camera_entity: Entity) {
+    commands.spawn((
+        UiTargetCamera(camera_entity),
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            ..default()
+        },
+        children![
+            (
+                PlayerRef { id: 0 },
+                Text::new("0"),
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(5.0),
+                    left: Val::Px(5.0),
+                    ..default()
+                }
+            ),
+            (
+                PlayerRef { id: 1 },
+                Text::new("0"),
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(5.0),
+                    right: Val::Px(5.0),
+                    ..default()
+                }
+            )
+        ],
+    ));
 }
 
 fn spawn_ui(commands: &mut Commands, camera_entity: Entity, player_id: usize) {
@@ -381,6 +496,24 @@ fn set_camera_viewports(windows: Query<&Window>, mut query: Query<(&CameraPositi
             });
         }
     }
+}
+
+fn apply_camera_mode(
+    camera_mode: Res<CameraMode>,
+    mut follow_cameras: Query<&mut Camera, With<CameraPosition>>,
+    mut overview_cameras: Query<&mut Camera, Without<CameraPosition>>,
+) {
+    for mut camera in follow_cameras.iter_mut() {
+        camera.is_active = matches!(*camera_mode, CameraMode::Follow);
+    }
+
+    for mut camera in overview_cameras.iter_mut() {
+        camera.is_active = matches!(*camera_mode, CameraMode::Overview);
+    }
+}
+
+fn set_follow_camera(mut camera_mode: ResMut<CameraMode>) {
+    *camera_mode = CameraMode::Follow;
 }
 
 fn camera_follow(
@@ -736,5 +869,12 @@ fn handle_ggrs_events(mut session: ResMut<Session<Config>>) {
                 _ => info!("GGRS event: {event:?}"),
             }
         }
+    }
+}
+
+fn clear_entities<T: Component>(mut commands: Commands, query: Query<Entity, With<T>>) {
+    for entity in &query {
+        commands.entity(entity).despawn_children();
+        commands.entity(entity).despawn();
     }
 }

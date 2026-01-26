@@ -1,6 +1,12 @@
 use bevy::prelude::*;
 use std::hash::{Hash, Hasher};
 
+#[derive(Component)]
+pub struct OnLoadingScreen;
+
+#[derive(Component)]
+pub struct OnMatchmakingScreen;
+
 #[derive(Component, Clone, Copy)]
 pub struct PlayerRef {
     pub id: usize,
