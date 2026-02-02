@@ -116,6 +116,15 @@ enum CameraMode {
     Follow,
 }
 
+impl CameraMode {
+    fn next(self) -> Self {
+        match self {
+            CameraMode::Overview => CameraMode::Follow,
+            CameraMode::Follow => CameraMode::Overview,
+        }
+    }
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -224,17 +233,19 @@ fn main() {
             (
                 wait_for_players.run_if(p2p_mode),
                 start_synctest_session.run_if(synctest_mode),
-                input::read_unsynced_inputs,
             )
                 .run_if(in_state(GameState::Matchmaking)),
         )
         .add_systems(
             OnEnter(GameState::InGame),
-            (set_follow_camera, spawn_terrain).chain(),
+            (set_follow_camera, spawn_terrain, spawn_combined_ui_score),
         )
         .add_systems(
             FixedUpdate,
-            handle_ggrs_events.run_if(in_state(GameState::InGame)),
+            (
+                handle_ggrs_events.run_if(in_state(GameState::InGame)),
+                input::read_unsynced_inputs,
+            ),
         )
         .add_systems(ReadInputs, input::read_local_inputs)
         .add_systems(OnEnter(RollbackState::InRound), spawn_players)
@@ -286,10 +297,7 @@ fn show_matchmaking_screen(mut commands: Commands) {
     commands.spawn((
         OnMatchmakingScreen,
         Node {
-            position_type: PositionType::Absolute,
-            margin: auto().horizontal(),
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
+            margin: auto().all(),
             ..default()
         },
         Text::new("Waiting for other players..."),
@@ -374,29 +382,44 @@ fn spawn_combined_ui(commands: &mut Commands, camera_entity: Entity) {
             height: Val::Percent(100.0),
             ..default()
         },
-        children![
-            (
-                PlayerRef { id: 0 },
-                Text::new("0"),
-                Node {
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(5.0),
-                    left: Val::Px(5.0),
-                    ..default()
-                }
-            ),
-            (
-                PlayerRef { id: 1 },
-                Text::new("0"),
-                Node {
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(5.0),
-                    right: Val::Px(5.0),
-                    ..default()
-                }
-            )
-        ],
     ));
+}
+
+fn spawn_combined_ui_score(
+    mut commands: Commands,
+    query: Query<Entity, (With<Node>, Without<PlayerRef>)>,
+) {
+    let player0_ui = commands
+        .spawn((
+            PlayerRef { id: 0 },
+            Text::new("0"),
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(10.0),
+                left: Val::Px(10.0),
+                ..default()
+            },
+        ))
+        .id();
+
+    let player1_ui = commands
+        .spawn((
+            PlayerRef { id: 1 },
+            Text::new("0"),
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(10.0),
+                right: Val::Px(10.0),
+                ..default()
+            },
+        ))
+        .id();
+
+    for entity in query.iter() {
+        commands
+            .entity(entity)
+            .add_children(&[player0_ui, player1_ui]);
+    }
 }
 
 fn spawn_ui(commands: &mut Commands, camera_entity: Entity, player_id: usize) {
@@ -412,7 +435,7 @@ fn spawn_ui(commands: &mut Commands, camera_entity: Entity, player_id: usize) {
             Text::new("0"),
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(5.0),
+                top: Val::Px(10.0),
                 margin: auto().horizontal(),
                 ..default()
             }
@@ -421,6 +444,7 @@ fn spawn_ui(commands: &mut Commands, camera_entity: Entity, player_id: usize) {
 }
 
 fn update_ui(game_stats: Res<GameStats>, mut query: Query<(&PlayerRef, &mut Text)>) {
+    // update score
     for (player, mut text) in &mut query {
         let stats = &game_stats[player.id];
         text.0 = format!("{}", stats.score);
@@ -650,8 +674,9 @@ fn start_synctest_session(
     next_state.set(GameState::InGame);
 }
 
-fn start_matchbox_socket(mut commands: Commands) {
-    let room_url = "wss://match.remcokranenburg.com/tunneltanktournament?next=2";
+fn start_matchbox_socket(mut commands: Commands, args: Res<Args>) {
+    let args_txt = if args.debug { "-debug" } else { "" };
+    let room_url = format!("wss://match.remcokranenburg.com/tunnel{}?next=2", args_txt);
     info!("Connecting to matchbox room at: {}", room_url);
     commands.insert_resource(MatchboxSocket::new_unreliable(room_url));
 }

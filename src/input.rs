@@ -1,4 +1,4 @@
-use crate::Config;
+use crate::{CameraMode, Config, args::Args};
 use bevy::{platform::collections::HashMap, prelude::*, window::WindowCloseRequested};
 use bevy_ggrs::{LocalInputs, LocalPlayers};
 
@@ -43,6 +43,8 @@ pub fn read_local_inputs(
 pub fn read_unsynced_inputs(
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<Entity, With<Window>>,
+    args: Res<Args>,
+    mut camera_mode: ResMut<CameraMode>,
     mut messages: MessageWriter<WindowCloseRequested>,
 ) {
     if keys.all_pressed([KeyCode::ControlLeft, KeyCode::KeyQ]) {
@@ -50,6 +52,11 @@ pub fn read_unsynced_inputs(
         for window in windows {
             messages.write(WindowCloseRequested { window });
         }
+    }
+
+    if args.debug && keys.just_pressed(KeyCode::Tab) {
+        // toggle camera mode
+        *camera_mode = camera_mode.next();
     }
 }
 
