@@ -680,7 +680,7 @@ fn start_synctest_session(
 
 fn start_matchbox_socket(mut commands: Commands, args: Res<Args>) {
     let args_txt = if args.debug { "-debug" } else { "" };
-    let room_url = format!("wss://match.remcokranenburg.com/tunnel{}?next=2", args_txt);
+    let room_url = format!("{}/tunnel{}?next=2", args.match_url, args_txt);
     info!("Connecting to matchbox room at: {}", room_url);
     commands.insert_resource(MatchboxSocket::new_unreliable(room_url));
 }

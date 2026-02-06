@@ -18,4 +18,8 @@ pub struct Args {
     /// enables debug mode
     #[clap(long)]
     pub debug: bool,
+
+    /// matchbox URL
+    #[clap(long, default_value_t = String::from("wss://match.remcokranenburg.com"))]
+    pub match_url: String,
 }
