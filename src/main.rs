@@ -25,17 +25,6 @@ const MAX_NUM_PLAYERS: usize = 2;
 const TERRAIN_WIDTH: u32 = 500;
 const TERRAIN_HEIGHT: u32 = 250;
 
-enum TerrainTextureIndex {
-    Dark,
-    Light,
-}
-
-impl Into<TileTextureIndex> for TerrainTextureIndex {
-    fn into(self) -> TileTextureIndex {
-        TileTextureIndex(self as u32)
-    }
-}
-
 // const COLOR_BLUE: Color = Color::srgb(0.173, 0.173, 1.0);
 // const COLOR_BLUE_DARK: Color = Color::srgb(0.0, 0.0, 0.714);
 // const COLOR_GREEN: Color = Color::srgb(0.0, 1.0, 0.0);
@@ -53,6 +42,19 @@ const SPEED_BULLET: f32 = 98.0;
 
 const PLAYER_RADIUS: f32 = 2.5;
 const BULLET_RADIUS: f32 = 0.5;
+
+enum TerrainType {
+    Dark,
+    Light,
+    Rock,
+    Empty,
+}
+
+impl Into<TileTextureIndex> for TerrainType {
+    fn into(self) -> TileTextureIndex {
+        TileTextureIndex(self as u32)
+    }
+}
 
 mod args;
 mod components;
@@ -465,9 +467,9 @@ fn spawn_terrain(mut commands: Commands, images: Res<ImageAssets>) {
     for x in 0..TERRAIN_WIDTH {
         for y in 0..TERRAIN_HEIGHT {
             let index = if rng.bool() {
-                TerrainTextureIndex::Light
+                TerrainType::Light
             } else {
-                TerrainTextureIndex::Dark
+                TerrainType::Dark
             };
 
             let tile_pos = TilePos { x, y };
