@@ -8,6 +8,12 @@ const INPUT_LEFT: u8 = 1 << 2;
 const INPUT_RIGHT: u8 = 1 << 3;
 const INPUT_FIRE: u8 = 1 << 4;
 
+const KEYS_UP: [KeyCode; 2] = [KeyCode::KeyW, KeyCode::ArrowUp];
+const KEYS_DOWN: [KeyCode; 2] = [KeyCode::KeyS, KeyCode::ArrowDown];
+const KEYS_LEFT: [KeyCode; 2] = [KeyCode::KeyA, KeyCode::ArrowLeft];
+const KEYS_RIGHT: [KeyCode; 2] = [KeyCode::KeyD, KeyCode::ArrowRight];
+const KEYS_FIRE: [KeyCode; 2] = [KeyCode::ControlLeft, KeyCode::Enter];
+
 pub fn read_local_inputs(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
@@ -18,19 +24,19 @@ pub fn read_local_inputs(
     for handle in &local_players.0 {
         let mut input = 0u8;
 
-        if keys.any_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) {
+        if keys.pressed(KEYS_UP[*handle]) {
             input |= INPUT_UP;
         }
-        if keys.any_pressed([KeyCode::ArrowDown, KeyCode::KeyS]) {
+        if keys.pressed(KEYS_DOWN[*handle]) {
             input |= INPUT_DOWN;
         }
-        if keys.any_pressed([KeyCode::ArrowLeft, KeyCode::KeyA]) {
+        if keys.pressed(KEYS_LEFT[*handle]) {
             input |= INPUT_LEFT
         }
-        if keys.any_pressed([KeyCode::ArrowRight, KeyCode::KeyD]) {
+        if keys.pressed(KEYS_RIGHT[*handle]) {
             input |= INPUT_RIGHT;
         }
-        if keys.any_pressed([KeyCode::Space, KeyCode::Enter]) {
+        if keys.pressed(KEYS_FIRE[*handle]) {
             input |= INPUT_FIRE;
         }
 

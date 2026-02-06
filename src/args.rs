@@ -7,6 +7,10 @@ pub struct Args {
     #[clap(long)]
     pub synctest: bool,
 
+    /// runs the game in local mode
+    #[clap(long)]
+    pub local: bool,
+
     /// input delay in frames
     #[clap(long, default_value_t = 2)]
     pub input_delay: usize,

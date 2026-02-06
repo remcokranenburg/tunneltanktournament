@@ -272,11 +272,11 @@ fn main() {
 }
 
 fn synctest_mode(args: Res<Args>) -> bool {
-    args.synctest
+    args.synctest || args.local
 }
 
 fn p2p_mode(args: Res<Args>) -> bool {
-    !args.synctest
+    !args.synctest && !args.local
 }
 
 fn show_loading_screen(mut commands: Commands) {
@@ -658,6 +658,10 @@ fn start_synctest_session(
     let mut session_builder = SessionBuilder::<Config>::new()
         .with_num_players(num_players)
         .with_input_delay(args.input_delay);
+
+    if args.local {
+        session_builder = session_builder.with_input_delay(0).with_check_distance(0);
+    }
 
     for i in 0..num_players {
         session_builder = session_builder
