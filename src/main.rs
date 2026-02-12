@@ -466,7 +466,11 @@ fn spawn_terrain(mut commands: Commands, images: Res<ImageAssets>) {
 
     for x in 0..TERRAIN_WIDTH {
         for y in 0..TERRAIN_HEIGHT {
-            let index = if rng.bool() {
+            let normalized_x = ((x as f32 / TERRAIN_WIDTH as f32 - 0.5).abs() * 2.0).powf(3.0);
+            let normalized_y = ((y as f32 / TERRAIN_HEIGHT as f32 - 0.5).abs() * 2.0).powf(3.0);
+            let index = if rng.f32() < normalized_x || rng.f32() < normalized_y {
+                TerrainType::Rock
+            } else if rng.bool() {
                 TerrainType::Light
             } else {
                 TerrainType::Dark
